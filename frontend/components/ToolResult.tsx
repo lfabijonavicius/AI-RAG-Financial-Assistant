@@ -252,6 +252,50 @@ export default function ToolResult({ toolCalls, onTickerClick }: Props) {
           )
         }
 
+        /* ── News (company or market) ── */
+        if (tc.tool === "get_company_news" || tc.tool === "get_market_news") {
+          const articles = Array.isArray(tc.result) ? tc.result as Record<string, string>[] : []
+          if (!articles.length) return null
+          const label = tc.tool === "get_market_news"
+            ? `MARKET NEWS · ${(tc.args.topic as string ?? "").toUpperCase()}`
+            : `NEWS · ${(tc.args.ticker as string ?? "").toUpperCase()}`
+          return (
+            <div key={i} className="rounded-xl p-3 space-y-2" style={{ backgroundColor: "var(--surface)", border: "1px solid var(--border)" }}>
+              <p className="text-xs font-semibold tracking-wider" style={{ color: "var(--color-teal)" }}>● {label}</p>
+              <div className="space-y-1.5">
+                {articles.map((a, j) => (
+                  <a
+                    key={j}
+                    href={a.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block rounded-lg p-2.5 transition-opacity hover:opacity-75"
+                    style={{ backgroundColor: "var(--surface-2)", border: "1px solid var(--border)" }}
+                  >
+                    <p className="text-xs font-medium leading-snug" style={{ color: "var(--text-primary)" }}>{a.title}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-xs" style={{ color: "var(--color-teal)" }}>{a.source}</span>
+                      {a.sentiment && (
+                        <span className="text-xs px-1.5 py-0.5 rounded-full font-medium"
+                          style={{
+                            color: a.sentiment === "Bullish" || a.sentiment === "Somewhat-Bullish" ? "#22c55e"
+                              : a.sentiment === "Bearish" || a.sentiment === "Somewhat-Bearish" ? "#ef4444"
+                              : "var(--text-secondary)",
+                            backgroundColor: a.sentiment === "Bullish" || a.sentiment === "Somewhat-Bullish" ? "rgba(34,197,94,0.1)"
+                              : a.sentiment === "Bearish" || a.sentiment === "Somewhat-Bearish" ? "rgba(239,68,68,0.1)"
+                              : "var(--surface)",
+                          }}>
+                          {a.sentiment}
+                        </span>
+                      )}
+                    </div>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )
+        }
+
         /* ── RAG knowledge base search ── */
         if (tc.tool === "search_knowledge_base") {
           if (!tc.rag_process?.queries?.length || !tc.rag_process?.chunks) return null
