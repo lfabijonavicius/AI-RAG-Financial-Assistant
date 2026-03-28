@@ -15,7 +15,7 @@ from rag.ingestion import ingest, ingest_file, delete_file_chunks
 from config import settings
 import json
 
-logging.basicConfig(level=logging.INFO if settings.environment == "development" else logging.WARNING)
+logging.basicConfig(level=logging.INFO)
 
 TOOL_STATUS: dict[str, str] = {
     "get_stock_price":          "Fetching live stock price...",
@@ -365,4 +365,11 @@ async def chat(request: ChatRequest):
             logger.error(f"Chat error: {e}")
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
-    return StreamingResponse(stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
