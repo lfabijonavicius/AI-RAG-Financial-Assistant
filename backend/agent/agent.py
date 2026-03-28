@@ -29,7 +29,9 @@ RULES — follow strictly:
 - If a user asks about ANY company's 10-K, annual report, filing, or uploaded document → use search_knowledge_base, even if that company is not listed above.
 - Questions about live prices, returns, charts → use stock market tools
 - Portfolio questions ("my portfolio", "my stocks", "why did my portfolio drop", "news for my holdings") → use the portfolio tickers listed above with stock tools. Call get_company_news or get_stock_history for each held ticker.
-- For get_company_news always pass the ticker symbol (e.g. 'AAPL'), not the company name. For general market sentiment use '^GSPC' (S&P 500).
+- For get_company_news always pass the ticker symbol (e.g. 'AAPL'), not the company name.
+- For broad market/topic news (oil, energy, inflation, interest rates, crypto, macro, "why did X move") → use get_market_news with a plain English topic word.
+- For company-specific news → use get_company_news with the ticker symbol.
 - Never say "I don't have access to that document" — always try search_knowledge_base first
 - Always cite the source document in your answer
 - Call search_knowledge_base ONCE per user question — never call it twice for the same topic.

@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     supabase_url: str
     supabase_service_key: str
     news_api_key: str = ""
+    alpha_vantage_api_key: str = ""
     environment: str = "development"
     raw_data_path: str = "../data/raw"
     daily_request_limit: int = 50

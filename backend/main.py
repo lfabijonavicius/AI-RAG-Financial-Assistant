@@ -23,6 +23,7 @@ TOOL_STATUS: dict[str, str] = {
     "get_fundamentals":         "Pulling company fundamentals...",
     "compare_stocks":           "Comparing stocks side by side...",
     "get_company_news":         "Fetching latest news...",
+    "get_market_news":          "Fetching market news...",
     "calculate_portfolio_risk": "Calculating portfolio risk...",
     "search_knowledge_base":    "Searching uploaded documents...",
 }

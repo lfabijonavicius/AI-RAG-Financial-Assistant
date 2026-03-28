@@ -7,6 +7,7 @@ from tools.stock_history import get_stock_history
 from tools.fundamentals import get_fundamentals
 from tools.stock_compare import compare_stocks
 from tools.news import get_company_news
+from tools.market_news import get_market_news
 from tools.portfolio import calculate_portfolio_risk
 
 TOOLS = [
@@ -15,5 +16,6 @@ TOOLS = [
     get_fundamentals,
     compare_stocks,
     get_company_news,
+    get_market_news,
     calculate_portfolio_risk,
 ]
