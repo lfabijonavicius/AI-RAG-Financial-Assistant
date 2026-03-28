@@ -1,7 +1,9 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import type { ToolCall } from "@/lib/types"
+import { useState } from "react"
+import { ChevronDown, ChevronUp } from "lucide-react"
+import type { ToolCall, RagProcess } from "@/lib/types"
 
 const StockChart = dynamic(() => import("@/components/StockChart"), { ssr: false })
 const MultiStockChart = dynamic(
@@ -46,6 +48,64 @@ function fmt(v: unknown, prefix = ""): string {
   if (n >= 1e9) return `${prefix}${(n / 1e9).toFixed(2)}B`
   if (n >= 1e6) return `${prefix}${(n / 1e6).toFixed(2)}M`
   return `${prefix}${n.toFixed(2)}`
+}
+
+function RagProcessCard({ process }: { process: RagProcess }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="rounded-xl p-3 space-y-2" style={{ backgroundColor: "var(--surface)", border: "1px solid var(--border)" }}>
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold tracking-wider" style={{ color: "var(--color-teal)" }}>● KNOWLEDGE BASE SEARCH</p>
+        <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+          {process.chunks.length} chunks · {[...new Set(process.chunks.map(c => c.source))].length} source{[...new Set(process.chunks.map(c => c.source))].length !== 1 ? "s" : ""}
+        </span>
+      </div>
+
+      {/* Generated queries */}
+      <div className="space-y-1">
+        <p className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>Generated queries</p>
+        {process.queries.map((q, i) => (
+          <div key={i} className="flex gap-2 text-xs">
+            <span className="shrink-0 font-mono-numbers" style={{ color: "var(--color-teal)" }}>{i + 1}.</span>
+            <span style={{ color: "var(--text-primary)" }}>{q}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Collapsible chunks */}
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-1 text-xs transition-opacity hover:opacity-75"
+        style={{ color: "var(--text-secondary)" }}
+      >
+        {open ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+        {open ? "Hide" : "Show"} retrieved chunks
+      </button>
+
+      {open && (
+        <div className="space-y-1.5 pt-1">
+          {process.chunks.map((chunk, i) => (
+            <div key={i} className="rounded-lg p-2.5" style={{ backgroundColor: "var(--surface-2)", border: "1px solid var(--border)" }}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-medium truncate" style={{ color: "var(--color-teal)" }}>
+                  📄 {chunk.source}
+                </span>
+                {chunk.similarity != null && (
+                  <span className="text-xs font-mono-numbers shrink-0 ml-2"
+                    style={{ color: chunk.similarity > 0.85 ? "#22c55e" : "var(--text-secondary)" }}>
+                    {chunk.similarity.toFixed(2)}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs leading-relaxed" style={{ color: "var(--text-secondary)" }}>
+                {chunk.content}…
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function ToolResult({ toolCalls, onTickerClick }: Props) {
@@ -189,6 +249,12 @@ export default function ToolResult({ toolCalls, onTickerClick }: Props) {
               </div>
             </div>
           )
+        }
+
+        /* ── RAG knowledge base search ── */
+        if (tc.tool === "search_knowledge_base") {
+          if (!tc.rag_process?.queries?.length || !tc.rag_process?.chunks) return null
+          return <RagProcessCard key={i} process={tc.rag_process} />
         }
 
         /* ── Generic fallback — skip if error result or no useful args ── */

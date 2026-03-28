@@ -27,6 +27,10 @@ const SKIP_WORDS = new Set([
   "CAGR","WACC","EBIT","FCF","ROE","ROI","DCF","VIX","EBITDA","PE","PEG",
   "INC","CORP","LTD","LLC","PLC","GROUP","FORM","ENDED","YEAR","FISCAL",
   "ANNUAL","REPORT","TESLA","APPLE","MICROSOFT","ALPHABET","AMAZON","NVIDIA",
+  // Hardware / GPU product names
+  "GPU","CPU","TPU","NPU","RTX","GTX","DLSS","CUDA","VRAM","DRAM","DDR",
+  "SLI","NVS","PCB","PCH","USB","HDMI","OLED","LCD","LED","SSD","HDD",
+  "NVMe","ARM","ISA","ALU","FPU","HBM","HPC","DPU",
 ])
 
 function linkTickers(content: string): string {
@@ -172,6 +176,13 @@ export default function MessageBubble({ message, userEmail, onTickerClick }: Pro
             style={{ backgroundColor: "var(--surface-2)", color: "var(--text-secondary)", borderRadius: "18px 18px 18px 4px" }}>
             <MarkdownContent content={message.content} onTickerClick={onTickerClick} />
           </div>
+        )}
+
+        {/* Per-message token count */}
+        {message.tokens_used != null && message.tokens_used > 0 && (
+          <p className="text-xs font-mono-numbers pl-1" style={{ color: "var(--text-secondary)", opacity: 0.5 }}>
+            {message.tokens_used.toLocaleString()} tokens
+          </p>
         )}
 
         {/* Source indicator */}

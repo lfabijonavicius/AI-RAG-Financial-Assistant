@@ -2,17 +2,49 @@
 
 import { useState, useEffect, useRef } from "react"
 import MessageBubble from "@/components/MessageBubble"
-import SuggestionPills from "@/components/SuggestionPills"
 import type { Message, ToolCall } from "@/lib/types"
 import { sendMessage, getHistory, createSession } from "@/lib/api"
-import { Send, ChevronDown } from "lucide-react"
+import { Send, ChevronDown, TrendingUp, FileText, BarChart2, Briefcase } from "lucide-react"
 
-const SUGGESTIONS = [
-  "What is Apple's current stock price?",
-  "Compare MSFT and GOOGL over 3 months",
-  "What are Tesla's main risks from their 10-K?",
-  "Show me IBM fundamentals",
+const FEATURE_CARDS = [
+  {
+    icon: TrendingUp,
+    title: "Live Market Data",
+    examples: [
+      "What is Apple's current stock price?",
+      "Compare MSFT and GOOGL over 3 months",
+      "Show me NVIDIA's price history for 1 year",
+    ],
+  },
+  {
+    icon: FileText,
+    title: "Document Q&A",
+    examples: [
+      "What are Tesla's main risks from their 10-K?",
+      "Summarise NVIDIA's revenue segments",
+      "What does the WEF report say about AI risks?",
+    ],
+  },
+  {
+    icon: BarChart2,
+    title: "Fundamentals",
+    examples: [
+      "Show me IBM fundamentals",
+      "What is Amazon's P/E ratio?",
+      "Compare market caps of AAPL and MSFT",
+    ],
+  },
+  {
+    icon: Briefcase,
+    title: "Portfolio",
+    examples: [
+      "How is my portfolio performing?",
+      "Show me news for my holdings",
+      "Calculate my portfolio risk",
+    ],
+  },
 ]
+
 
 interface Props {
   sessionId: string | null
@@ -30,6 +62,7 @@ export default function ChatWindow({ sessionId, userId, userEmail, messages, onM
   const [streamingContent, setStreamingContent] = useState("")
   const [statusMsg, setStatusMsg] = useState("")
   const [elapsedStatus, setElapsedStatus] = useState("")
+  const [sessionTokens, setSessionTokens] = useState(0)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -59,10 +92,19 @@ export default function ChatWindow({ sessionId, userId, userEmail, messages, onM
   }, [streaming, streamingContent])
   const hasSentMessage = messages.length > 0
   const toolCallCount = messages.filter(m => m.tool_calls?.length).length
+  const justCreatedSession = useRef(false)
 
   useEffect(() => {
     if (sessionId) {
-      getHistory(sessionId).then(msgs => msgs.forEach(onMessageAdded))
+      if (justCreatedSession.current) {
+        justCreatedSession.current = false
+        return
+      }
+      getHistory(sessionId).then(msgs => {
+        msgs.forEach(onMessageAdded)
+        const total = msgs.reduce((sum, m) => sum + (m.tokens_used ?? 0), 0)
+        setSessionTokens(total)
+      })
     }
   }, [sessionId])
 
@@ -88,6 +130,7 @@ export default function ChatWindow({ sessionId, userId, userEmail, messages, onM
     let sid = sessionId
     if (!sid) {
       sid = await createSession(userId, msg.slice(0, 50))
+      justCreatedSession.current = true
       onSessionCreated(sid)
     }
 
@@ -105,14 +148,18 @@ export default function ChatWindow({ sessionId, userId, userEmail, messages, onM
 
     let fullContent = ""
     let finalToolCalls: ToolCall[] | undefined
+    let finalTokens = 0
 
     await sendMessage(
       msg, sid, userId,
       (token) => { fullContent += token; setStreamingContent(fullContent) },
-      (tcs) => { finalToolCalls = tcs },
+      (tcs, tokens) => { finalToolCalls = tcs; finalTokens = tokens },
       (err) => { fullContent = `Error: ${err}`; setStreamingContent(fullContent) },
-      (status) => { setStatusMsg(status) }
+      (status) => { setStatusMsg(status) },
+      () => { fullContent = ""; setStreamingContent("") }
     )
+
+    setSessionTokens(prev => prev + finalTokens)
 
     const assistantMsg: Message = {
       id: crypto.randomUUID(),
@@ -120,6 +167,7 @@ export default function ChatWindow({ sessionId, userId, userEmail, messages, onM
       role: "assistant",
       content: fullContent,
       tool_calls: finalToolCalls,
+      tokens_used: finalTokens,
       created_at: new Date().toISOString(),
     }
     onMessageAdded(assistantMsg)
@@ -144,6 +192,18 @@ export default function ChatWindow({ sessionId, userId, userEmail, messages, onM
               </span>
             </>
           )}
+          {sessionTokens > 0 && (
+            <>
+              <span style={{ color: "var(--border)" }}>·</span>
+              <span className="text-xs font-mono-numbers" style={{ color: "var(--text-secondary)" }}>
+                {sessionTokens.toLocaleString()} tokens
+              </span>
+              <span className="text-xs font-mono-numbers px-1.5 py-0.5 rounded-full"
+                style={{ color: "var(--color-teal)", backgroundColor: "rgba(29,158,117,0.08)" }}>
+                ~${(sessionTokens * 0.00000030).toFixed(4)}
+              </span>
+            </>
+          )}
         </div>
       )}
 
@@ -154,14 +214,42 @@ export default function ChatWindow({ sessionId, userId, userEmail, messages, onM
         className="flex-1 overflow-y-auto px-6 py-6 relative"
       >
         {messages.length === 0 && !streaming && (
-          <div className="flex items-center justify-center h-full">
+          <div className="flex flex-col items-center justify-center h-full gap-6 py-8">
             <div className="text-center">
-              <h2 className="text-xl font-semibold mb-2" style={{ color: "var(--text-primary)" }}>
-                Financial Research Assistant
+              <h2 className="text-2xl font-bold mb-1">
+                <span style={{ color: "var(--text-primary)" }}>fin</span><span style={{ color: "var(--color-teal)" }}>sight</span>
               </h2>
               <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-                Ask about stocks, annual reports, market trends, and more.
+                Ask about stocks, annual reports, portfolio performance, and more.
               </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3 w-full max-w-2xl">
+              {FEATURE_CARDS.map(({ icon: Icon, title, examples }) => (
+                <div
+                  key={title}
+                  className="rounded-xl p-4 space-y-2.5"
+                  style={{ backgroundColor: "var(--surface)", border: "1px solid var(--border)" }}
+                >
+                  <div className="flex items-center gap-2">
+                    <Icon size={14} style={{ color: "var(--color-teal)" }} />
+                    <span className="text-xs font-semibold tracking-wider" style={{ color: "var(--color-teal)" }}>
+                      {title.toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {examples.map(ex => (
+                      <button
+                        key={ex}
+                        onClick={() => handleSubmit(ex)}
+                        className="w-full text-left text-xs px-3 py-2 rounded-lg transition-opacity hover:opacity-75"
+                        style={{ backgroundColor: "var(--surface-2)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}
+                      >
+                        {ex}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -219,10 +307,6 @@ export default function ChatWindow({ sessionId, userId, userEmail, messages, onM
         </div>
       )}
 
-      {/* Suggestion pills */}
-      {!hasSentMessage && (
-        <SuggestionPills pills={SUGGESTIONS} onSelect={(p) => handleSubmit(p)} />
-      )}
 
       {/* Input */}
       <div className="px-4 pb-4">

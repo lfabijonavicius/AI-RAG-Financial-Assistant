@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     raw_data_path: str = "../data/raw"
     daily_request_limit: int = 50
+    allowed_origins: str = "http://localhost:3000"
 
     class Config:
         env_file = ".env"

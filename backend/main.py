@@ -32,7 +32,7 @@ app = FastAPI(title="Finance Chatbot API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[o.strip() for o in settings.allowed_origins.split(",")],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -146,7 +146,8 @@ async def get_portfolio(user_id: str):
         avg_buy = float(row["avg_buy_price"])
         try:
             t = yf.Ticker(ticker)
-            price = t.fast_info.last_price or 0.0
+            hist = t.history(period="5d")
+            price = float(hist["Close"].iloc[-1]) if not hist.empty else 0.0
             name = (t.info or {}).get("shortName") or ticker
         except Exception:
             price = 0.0
@@ -243,11 +244,27 @@ async def get_ticker_info(ticker: str):
     }
 
 
+@app.get("/debug/retrieve")
+async def debug_retrieve(q: str, k: int = 10):
+    """Dev-only: show which chunks would be retrieved for a query."""
+    from rag.retriever import SupabaseRetriever
+    retriever = SupabaseRetriever(top_k=k)
+    docs = retriever._get_relevant_documents(q)
+    return {
+        "query": q,
+        "chunks_returned": len(docs),
+        "chunks": [
+            {"source": d.metadata.get("source"), "similarity": d.metadata.get("similarity"), "content": d.page_content}
+            for d in docs
+        ],
+    }
+
+
 @app.post("/chat")
 async def chat(request: ChatRequest):
     check_rate_limit(request.user_id)
 
-    agent, history = get_agent(request.session_id)
+    agent, history = get_agent(request.session_id, request.user_id)
 
     from langchain_core.messages import HumanMessage
 
@@ -256,6 +273,10 @@ async def chat(request: ChatRequest):
         tool_calls_log = []
         # Map tool_call_id -> tool name so we can match results
         pending: dict[str, str] = {}
+        # When the RAG tool is called, stream its result directly and skip the
+        # agent's post-tool paraphrase (which otherwise duplicates the answer).
+        rag_called = False
+        tokens_used = 0
 
         try:
             for chunk in agent.stream(
@@ -264,13 +285,6 @@ async def chat(request: ChatRequest):
             ):
                 # chunk is a tuple (message, metadata) in messages stream mode
                 message, metadata = chunk
-                if hasattr(message, "content") and message.content:
-                    # AIMessageChunk.type == "AIMessageChunk", AIMessage.type == "ai"
-                    is_ai = message.type in ("ai", "AIMessageChunk")
-                    has_tool_calls = bool(getattr(message, "tool_calls", None))
-                    if is_ai and not has_tool_calls:
-                        full_response += message.content
-                        yield f"data: {json.dumps({'token': message.content})}\n\n"
 
                 # Capture tool calls (input args + id) and emit status
                 if hasattr(message, "tool_calls") and message.tool_calls:
@@ -282,6 +296,11 @@ async def chat(request: ChatRequest):
                             "result": None,
                         })
                         status = TOOL_STATUS.get(tc["name"], f"Running {tc['name']}...")
+                        if tc["name"] == "search_knowledge_base":
+                            rag_called = True
+                            # Discard any pre-tool text already streamed
+                            full_response = ""
+                            yield f"data: {json.dumps({'clear': True})}\n\n"
                         yield f"data: {json.dumps({'status': status})}\n\n"
                         yield ": ping\n\n"  # flush buffer
 
@@ -297,6 +316,37 @@ async def chat(request: ChatRequest):
                         if entry["tool"] == tool_name and entry["result"] is None:
                             entry["result"] = result
                             break
+                    # For the RAG tool, strip the hidden process suffix, stream
+                    # the clean answer, and store the process data separately.
+                    if tool_name == "search_knowledge_base":
+                        content = message.content
+                        process: dict = {}
+                        if "__RAG_PROCESS__" in content:
+                            answer_part, process_part = content.split("__RAG_PROCESS__", 1)
+                            content = answer_part.strip()
+                            try:
+                                process = json.loads(process_part.strip())
+                            except Exception:
+                                pass
+                        for entry in reversed(tool_calls_log):
+                            if entry["tool"] == tool_name:
+                                entry["rag_process"] = process
+                                break
+                        full_response = content
+                        yield f"data: {json.dumps({'token': content})}\n\n"
+
+                # Stream AI text — skip post-tool agent output when RAG handled it
+                if hasattr(message, "content") and message.content:
+                    is_ai = message.type in ("ai", "AIMessageChunk")
+                    has_tool_calls = bool(getattr(message, "tool_calls", None))
+                    if is_ai and not has_tool_calls and not rag_called:
+                        full_response += message.content
+                        yield f"data: {json.dumps({'token': message.content})}\n\n"
+
+                # Capture token usage from AI messages
+                usage = getattr(message, "usage_metadata", None)
+                if usage:
+                    tokens_used = usage.get("total_tokens", tokens_used)
 
             # Persist the full turn
             persist_turn(
@@ -304,10 +354,11 @@ async def chat(request: ChatRequest):
                 user_message=request.message,
                 assistant_message=full_response,
                 tool_calls=tool_calls_log if tool_calls_log else None,
+                tokens_used=tokens_used if tokens_used else None,
             )
             increment_usage(request.user_id)
 
-            yield f"data: {json.dumps({'tool_calls': tool_calls_log})}\n\n"
+            yield f"data: {json.dumps({'tool_calls': tool_calls_log, 'tokens_used': tokens_used})}\n\n"
             yield "data: [DONE]\n\n"
 
         except Exception as e:

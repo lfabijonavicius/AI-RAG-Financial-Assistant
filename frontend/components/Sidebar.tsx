@@ -41,6 +41,13 @@ export default function Sidebar({ sessions, activeSessionId, userEmail, onSelect
 
   return (
     <div className="w-[220px] shrink-0 flex flex-col h-full" style={{ backgroundColor: "var(--surface)", borderRight: "1px solid var(--border)" }}>
+      {/* Brand */}
+      <div className="px-4 pt-4 pb-3 border-b" style={{ borderColor: "var(--border)" }}>
+        <p className="text-xl font-bold">
+          <span style={{ color: "var(--text-primary)" }}>fin</span><span style={{ color: "var(--color-teal)" }}>sight</span>
+        </p>
+      </div>
+
       {/* User */}
       <div className="px-4 py-4 flex items-center gap-3 border-b" style={{ borderColor: "var(--border)" }}>
         <Initials email={userEmail} />

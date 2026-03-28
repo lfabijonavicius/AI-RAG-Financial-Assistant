@@ -21,7 +21,9 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: "var(--background)" }}>
       <div className="w-full max-w-md p-8 rounded-2xl" style={{ backgroundColor: "var(--surface)", border: "1px solid var(--border)" }}>
         <div className="mb-8 text-center">
-          <h1 className="text-2xl font-bold mb-1" style={{ color: "var(--color-teal)" }}>Finance Chatbot</h1>
+          <h1 className="text-3xl font-bold mb-1">
+            <span style={{ color: "var(--text-primary)" }}>fin</span><span style={{ color: "var(--color-teal)" }}>sight</span>
+          </h1>
           <p className="text-sm" style={{ color: "var(--text-secondary)" }}>AI-powered financial research assistant</p>
         </div>
         <Auth

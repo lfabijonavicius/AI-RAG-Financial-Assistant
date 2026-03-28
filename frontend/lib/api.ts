@@ -7,9 +7,10 @@ export async function sendMessage(
   sessionId: string,
   userId: string,
   onToken: (token: string) => void,
-  onDone: (toolCalls: StreamChunk["tool_calls"]) => void,
+  onDone: (toolCalls: StreamChunk["tool_calls"], tokensUsed: number) => void,
   onError: (err: string) => void,
-  onStatus?: (status: string) => void
+  onStatus?: (status: string) => void,
+  onClear?: () => void
 ): Promise<void> {
   const res = await fetch(`${BASE}/chat`, {
     method: "POST",
@@ -37,9 +38,10 @@ export async function sendMessage(
       try {
         const chunk: StreamChunk = JSON.parse(raw)
         if (chunk.error) { onError(chunk.error); continue }
+        if (chunk.clear) { onClear?.(); continue }
         if (chunk.status) { onStatus?.(chunk.status); continue }
         if (chunk.token) onToken(chunk.token)
-        if (chunk.tool_calls !== undefined) onDone(chunk.tool_calls)
+        if (chunk.tool_calls !== undefined) onDone(chunk.tool_calls, chunk.tokens_used ?? 0)
       } catch { /* ignore malformed lines */ }
     }
   }

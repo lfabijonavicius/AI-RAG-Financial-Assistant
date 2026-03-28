@@ -3,10 +3,22 @@ export interface Source {
   metadata: { source: string; similarity?: number }
 }
 
+export interface RagChunk {
+  content: string
+  source: string
+  similarity: number | null
+}
+
+export interface RagProcess {
+  queries: string[]
+  chunks: RagChunk[]
+}
+
 export interface ToolCall {
   tool: string
   args: Record<string, unknown>
   result?: Record<string, unknown> | null
+  rag_process?: RagProcess
 }
 
 export interface Message {
@@ -56,4 +68,5 @@ export interface StreamChunk {
   tool_calls?: ToolCall[]
   tokens_used?: number
   error?: string
+  clear?: boolean
 }
