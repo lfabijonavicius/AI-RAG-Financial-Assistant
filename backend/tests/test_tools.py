@@ -204,24 +204,20 @@ class TestCompareStocks:
 # ---------------------------------------------------------------------------
 
 class TestGetCompanyNews:
-    def _mock_response(self, articles: list) -> MagicMock:
-        resp = MagicMock()
-        resp.json.return_value = {"articles": articles}
-        resp.raise_for_status = MagicMock()
-        return resp
+    def _yf_articles(self):
+        return [
+            {"content": {"title": "Apple hits record", "provider": {"displayName": "Reuters"},
+             "canonicalUrl": {"url": "https://reuters.com/1"}, "pubDate": "2024-01-01T10:00:00Z", "summary": "Summary 1"}},
+            {"content": {"title": "AAPL earnings beat", "provider": {"displayName": "Bloomberg"},
+             "canonicalUrl": {"url": "https://bloomberg.com/2"}, "pubDate": "2024-01-02T10:00:00Z", "summary": "Summary 2"}},
+        ]
 
     def test_returns_list_of_articles(self):
-        articles = [
-            {"title": "Apple hits record", "source": {"name": "Reuters"},
-             "url": "https://reuters.com/1", "publishedAt": "2024-01-01T10:00:00Z"},
-            {"title": "AAPL earnings beat", "source": {"name": "Bloomberg"},
-             "url": "https://bloomberg.com/2", "publishedAt": "2024-01-02T10:00:00Z"},
-        ]
-        with patch("tools.news.httpx.get", return_value=self._mock_response(articles)):
-            with patch("tools.news.settings") as mock_settings:
-                mock_settings.news_api_key = "test-key"
-                from tools.news import get_company_news
-                result = get_company_news.invoke({"company_name": "Apple"})
+        import tools.news as news_mod
+        mock_ticker = MagicMock()
+        mock_ticker.news = self._yf_articles()
+        with patch.object(news_mod.yf, "Ticker", return_value=mock_ticker):
+            result = news_mod.get_company_news.invoke({"ticker": "AAPL"})
 
         assert isinstance(result, list)
         assert len(result) == 2
@@ -230,22 +226,21 @@ class TestGetCompanyNews:
         assert "url" in result[0]
         assert "published_at" in result[0]
 
-    def test_returns_error_when_api_key_missing(self):
-        with patch("tools.news.settings") as mock_settings:
-            mock_settings.news_api_key = ""
-            from tools.news import get_company_news
-            result = get_company_news.invoke({"company_name": "Apple"})
+    def test_returns_error_when_no_articles(self):
+        import tools.news as news_mod
+        mock_ticker = MagicMock()
+        mock_ticker.news = []
+        with patch.object(news_mod.yf, "Ticker", return_value=mock_ticker):
+            result = news_mod.get_company_news.invoke({"ticker": "FAKE"})
 
         assert "error" in result
 
-    def test_returns_empty_list_when_no_articles(self):
-        with patch("tools.news.httpx.get", return_value=self._mock_response([])):
-            with patch("tools.news.settings") as mock_settings:
-                mock_settings.news_api_key = "test-key"
-                from tools.news import get_company_news
-                result = get_company_news.invoke({"company_name": "UnknownCorp"})
+    def test_returns_error_on_exception(self):
+        import tools.news as news_mod
+        with patch.object(news_mod.yf, "Ticker", side_effect=Exception("network error")):
+            result = news_mod.get_company_news.invoke({"ticker": "AAPL"})
 
-        assert result == []
+        assert "error" in result
 
 
 # ---------------------------------------------------------------------------
