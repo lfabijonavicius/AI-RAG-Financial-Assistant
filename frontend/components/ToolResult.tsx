@@ -171,6 +171,7 @@ export default function ToolResult({ toolCalls, onTickerClick }: Props) {
             close: row.Close ?? row.close,
           }))
           const ticker = (data.ticker ?? tc.args.ticker) as string
+          const name = (data.name ?? ticker) as string
           const ret = data.total_return_pct as number | undefined
           const pos = (ret ?? 0) >= 0
           const periodLabel = (data.period ?? tc.args.period ?? "") as string
@@ -183,7 +184,7 @@ export default function ToolResult({ toolCalls, onTickerClick }: Props) {
                   <p className="text-xs font-semibold tracking-wider mb-0.5" style={{ color: "var(--color-teal)" }}>
                     ● PRICE HISTORY
                   </p>
-                  <button onClick={() => onTickerClick?.(ticker)} className="text-base font-bold hover:opacity-75 transition-opacity" style={{ color: "var(--text-primary)" }}>{ticker}</button>
+                  <button onClick={() => onTickerClick?.(ticker)} className="text-base font-bold hover:opacity-75 transition-opacity" style={{ color: "var(--text-primary)" }}>{name}</button>
                 </div>
                 <div className="text-right">
                   {ret != null && (

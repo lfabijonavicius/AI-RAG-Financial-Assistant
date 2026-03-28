@@ -14,7 +14,8 @@ def get_stock_history(ticker: str, period: str = "1mo") -> dict:
     """Get historical stock price data for a ticker.
     period can be: 1mo, 3mo, 6mo, 1y, 2y, 5y.
     Use this when the user asks about historical performance, price trends, or wants a chart."""
-    t = yf.Ticker(ticker.upper())
+    sym = ticker.upper()
+    t = yf.Ticker(sym)
     hist = t.history(period=period)
     if hist.empty:
         return {"error": f"No historical data found for {ticker}"}
@@ -28,8 +29,12 @@ def get_stock_history(ticker: str, period: str = "1mo") -> dict:
     drawdown = ((closes - rolling_max) / rolling_max).min()
     max_drawdown = round(float(drawdown) * 100, 2)
 
+    info = t.info or {}
+    name = info.get("shortName") or info.get("longName") or sym
+
     return {
-        "ticker": ticker.upper(),
+        "ticker": sym,
+        "name": name,
         "period": period,
         "total_return_pct": total_return,
         "max_drawdown_pct": max_drawdown,
