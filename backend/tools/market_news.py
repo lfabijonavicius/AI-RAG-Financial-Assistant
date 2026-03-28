@@ -81,7 +81,7 @@ def get_market_news(topic: str) -> list[dict] | dict:
                 "summary": a.get("summary", ""),
                 "sentiment": a.get("overall_sentiment_label", ""),
             }
-            for a in articles
+            for a in articles[:5]
         ]
     except Exception as e:
         logger.error(f"Alpha Vantage news error for topic '{topic}': {e}")
