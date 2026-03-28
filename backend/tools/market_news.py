@@ -45,6 +45,13 @@ TOPIC_MAP: dict[str, str] = {
     "crude": "energy_transportation",
     "gas": "energy_transportation",
     "energy": "energy_transportation",
+    "solar": "energy_transportation",
+    "renewable": "energy_transportation",
+    "clean energy": "energy_transportation",
+    "wind": "energy_transportation",
+    "nuclear": "energy_transportation",
+    "ev": "energy_transportation",
+    "electric vehicle": "energy_transportation",
     "inflation": "economy_macro",
     "gdp": "economy_macro",
     "recession": "economy_macro",
@@ -62,8 +69,28 @@ TOPIC_MAP: dict[str, str] = {
     "finance": "finance",
     "technology": "technology",
     "tech": "technology",
+    "semiconductor": "technology",
+    "chip": "technology",
+    "ai": "technology",
+    "artificial intelligence": "technology",
+    "crypto": "blockchain",
+    "bitcoin": "blockchain",
+    "ethereum": "blockchain",
+    "gold": "financial_markets",
+    "silver": "financial_markets",
+    "copper": "financial_markets",
     "manufacturing": "manufacturing",
     "retail": "retail_wholesale",
+    "real estate": "real_estate",
+    "reit": "real_estate",
+    "housing": "real_estate",
+    "pharma": "life_sciences",
+    "biotech": "life_sciences",
+    "healthcare": "life_sciences",
+    "defence": "financial_markets",
+    "defense": "financial_markets",
+    "bank": "finance",
+    "banking": "finance",
 }
 
 
@@ -84,26 +111,24 @@ def get_market_news(topic: str) -> list[dict] | dict:
     tickers = next((v for k, v in TICKER_MAP.items() if k in key), None)
     av_topic = None if tickers else next((v for k, v in TOPIC_MAP.items() if k in key), "financial_markets")
 
-    params: dict = {
+    def _fetch(params: dict) -> list:
+        r = httpx.get("https://www.alphavantage.co/query", params=params, timeout=10)
+        r.raise_for_status()
+        return r.json().get("feed", [])
+
+    base_params: dict = {
         "function": "NEWS_SENTIMENT",
         "sort": "LATEST",
         "apikey": settings.alpha_vantage_api_key,
     }
-    if tickers:
-        params["tickers"] = tickers
-    else:
-        params["topics"] = av_topic
 
     try:
-        response = httpx.get(
-            "https://www.alphavantage.co/query",
-            params=params,
-            timeout=10,
-        )
-        response.raise_for_status()
-        data = response.json()
-
-        articles = data.get("feed", [])
+        # Try ticker-based first (more specific), fall back to topic if empty
+        articles: list = []
+        if tickers:
+            articles = _fetch({**base_params, "tickers": tickers})
+        if not articles:
+            articles = _fetch({**base_params, "topics": av_topic})
         if not articles:
             return {"error": f"No news found for topic: {topic}"}
 
