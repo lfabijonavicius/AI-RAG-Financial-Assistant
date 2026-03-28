@@ -114,7 +114,13 @@ def get_market_news(topic: str) -> list[dict] | dict:
     def _fetch(params: dict) -> list:
         r = httpx.get("https://www.alphavantage.co/query", params=params, timeout=10)
         r.raise_for_status()
-        return r.json().get("feed", [])
+        data = r.json()
+        # Detect Alpha Vantage rate limit / API key errors
+        if "Note" in data or "Information" in data:
+            msg = data.get("Note") or data.get("Information", "")
+            logger.warning(f"Alpha Vantage API limit: {msg}")
+            raise Exception("Alpha Vantage rate limit reached. Try again in a minute.")
+        return data.get("feed", [])
 
     base_params: dict = {
         "function": "NEWS_SENTIMENT",
