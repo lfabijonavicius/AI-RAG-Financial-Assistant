@@ -129,7 +129,7 @@ export default function ToolResult({ toolCalls, onTickerClick }: Props) {
             tickers.flatMap(t => Object.keys(history[t] ?? {}))
           )].sort()
           const chartData = allDates.map(date => {
-            const point: Record<string, string | number> = { date }
+            const point: { date: string } & Record<string, string | number> = { date }
             tickers.forEach(t => { if (history[t]?.[date] != null) point[t] = history[t][date] })
             return point
           })
