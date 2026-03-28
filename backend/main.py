@@ -60,6 +60,39 @@ class SessionRequest(BaseModel):
 
 # --- Routes ---
 
+MARKET_SYMBOLS = [
+    ("^GSPC",  "S&P 500"),
+    ("^DJI",   "Dow Jones"),
+    ("^IXIC",  "NASDAQ"),
+    ("^RUT",   "Russell 2000"),
+    ("GC=F",   "Gold"),
+    ("BTC-USD","Bitcoin"),
+]
+
+@app.get("/markets")
+async def get_markets():
+    import yfinance as yf
+    from concurrent.futures import ThreadPoolExecutor
+
+    def fetch(sym_name):
+        sym, name = sym_name
+        try:
+            t = yf.Ticker(sym)
+            hist = t.history(period="2d")
+            if len(hist) < 2:
+                return None
+            prev, curr = float(hist["Close"].iloc[-2]), float(hist["Close"].iloc[-1])
+            change_pct = round((curr - prev) / prev * 100, 2)
+            return {"symbol": sym, "name": name, "price": round(curr, 2), "change_pct": change_pct}
+        except Exception:
+            return None
+
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        results = list(ex.map(fetch, MARKET_SYMBOLS))
+
+    return {"markets": [r for r in results if r]}
+
+
 @app.get("/health")
 async def health():
     try:

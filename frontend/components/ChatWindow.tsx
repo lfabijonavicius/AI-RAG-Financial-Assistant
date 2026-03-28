@@ -5,6 +5,7 @@ import MessageBubble from "@/components/MessageBubble"
 import type { Message, ToolCall } from "@/lib/types"
 import { sendMessage, getHistory, createSession } from "@/lib/api"
 import { Send, ChevronDown, TrendingUp, FileText, BarChart2, Briefcase } from "lucide-react"
+import MarketTicker from "@/components/MarketTicker"
 
 const FEATURE_CARDS = [
   {
@@ -223,6 +224,7 @@ export default function ChatWindow({ sessionId, userId, userEmail, messages, onM
                 Ask about stocks, annual reports, portfolio performance, and more.
               </p>
             </div>
+            <MarketTicker />
             <div className="grid grid-cols-2 gap-3 w-full max-w-2xl">
               {FEATURE_CARDS.map(({ icon: Icon, title, examples }) => (
                 <div
