@@ -20,9 +20,9 @@ const FEATURE_CARDS = [
     icon: FileText,
     title: "Document Q&A",
     examples: [
-      "What are Tesla's main risks from their 10-K?",
+      "What are NVIDIA's main risks from their 10-K?",
       "Summarise NVIDIA's revenue segments",
-      "What does the WEF report say about AI risks?",
+      "What was NVIDIA's gross margin in fiscal year 2024?",
     ],
   },
   {
