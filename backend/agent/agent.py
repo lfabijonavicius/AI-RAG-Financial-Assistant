@@ -48,16 +48,18 @@ def build_rag_tool():
     """Wrap the RAG chain as a LangChain tool so the agent can call it."""
     import json as _json
     from rag.retriever import TracedMultiQueryRetriever
-    rag_chain = get_rag_chain()
 
     @tool
-    def search_knowledge_base(query: str) -> str:
-        """MUST use this tool for any question about: WEF Global Risks Report, Tesla/Microsoft/IBM
-        annual reports or 10-K filings, Vanguard S&P 500 ETF (VOO) prospectus, any other uploaded
-        annual reports or fund documents, company strategy, risks, revenue, business segments,
-        ESG, governance, expense ratios, or any content from uploaded documents.
-        Do NOT answer document questions from memory — always search here first."""
-        result = rag_chain.invoke({"query": query})
+    def search_knowledge_base(query: str, source_filter: str = "") -> str:
+        """MUST use this tool for any question about uploaded documents including annual reports,
+        10-K filings, fund prospectuses, research reports, company strategy, risks, revenue,
+        business segments, ESG, governance, or any content from uploaded documents.
+        Do NOT answer document questions from memory — always search here first.
+        When the user asks about a specific company's document (e.g. 'Amazon 10-K'),
+        pass the company name as source_filter (e.g. source_filter='amazon') so only
+        that company's documents are searched."""
+        chain = get_rag_chain(source_filter=source_filter)
+        result = chain.invoke({"query": query})
         answer = result["result"]
         sources = list({
             doc.metadata.get("source", "unknown")
@@ -68,7 +70,7 @@ def build_rag_tool():
 
         # Append RAG process data as a hidden suffix so main.py can extract it
         # without it being visible to the user or confusing the agent.
-        retriever = rag_chain.retriever
+        retriever = chain.retriever
         if isinstance(retriever, TracedMultiQueryRetriever):
             process = {"queries": retriever._last_queries, "chunks": retriever._last_chunks}
             answer += f"\n\n__RAG_PROCESS__{_json.dumps(process)}"

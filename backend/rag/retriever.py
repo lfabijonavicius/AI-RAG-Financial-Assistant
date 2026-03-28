@@ -25,28 +25,35 @@ class SupabaseRetriever(BaseRetriever):
     """Calls match_documents RPC directly — compatible with supabase-py 2.x."""
 
     top_k: int = TOP_K
+    source_filter: str = ""
 
     def _get_relevant_documents(self, query: str) -> list[Document]:
         embeddings = OpenAIEmbeddings(openai_api_key=settings.openai_api_key)
         query_vector = embeddings.embed_query(query)
 
+        # Fetch extra when filtering so we still get top_k after narrowing
+        fetch_count = self.top_k * 4 if self.source_filter else self.top_k
         result = supabase.rpc(
             "match_documents",
-            {"query_embedding": query_vector, "match_count": self.top_k},
+            {"query_embedding": query_vector, "match_count": fetch_count},
         ).execute()
 
         docs = []
         for row in result.data:
+            source = row.get("metadata", {}).get("source", "unknown")
+            if self.source_filter and self.source_filter.lower() not in source.lower():
+                continue
             docs.append(Document(
                 page_content=row["content"],
-                metadata={"source": row.get("metadata", {}).get("source", "unknown"), "similarity": row.get("similarity")},
+                metadata={"source": source, "similarity": row.get("similarity")},
             ))
-        logger.info(f"Retrieved {len(docs)} documents for query")
+        docs = docs[:self.top_k]
+        logger.info(f"Retrieved {len(docs)} documents for query (filter={self.source_filter!r})")
         return docs
 
 
-def get_retriever(top_k: int = TOP_K) -> SupabaseRetriever:
-    return SupabaseRetriever(top_k=top_k)
+def get_retriever(top_k: int = TOP_K, source_filter: str = "") -> SupabaseRetriever:
+    return SupabaseRetriever(top_k=top_k, source_filter=source_filter)
 
 
 from pydantic import PrivateAttr

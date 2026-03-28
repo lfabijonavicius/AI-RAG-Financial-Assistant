@@ -28,7 +28,7 @@ Question: {question}
 Answer:"""
 
 
-def get_rag_chain() -> RetrievalQA:
+def get_rag_chain(source_filter: str = "") -> RetrievalQA:
     llm = ChatOpenAI(
         model="gpt-4o-mini",
         temperature=0,
@@ -39,7 +39,7 @@ def get_rag_chain() -> RetrievalQA:
     # 1. LLM generates 3 alternative phrasings of the user's question
     # 2. Each phrasing is searched independently against the vector DB
     # 3. Results are deduplicated and combined before being passed to the LLM
-    base_retriever = get_retriever()
+    base_retriever = get_retriever(source_filter=source_filter)
     multi_retriever = TracedMultiQueryRetriever.from_llm(
         retriever=base_retriever,
         llm=llm,
