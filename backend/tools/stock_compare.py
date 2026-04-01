@@ -1,5 +1,7 @@
 # tools/stock_compare.py
-# Tool 4 (Optional): Side-by-side comparison of multiple tickers.
+# Tool 4: Compare multiple stocks side by side over a given period.
+# Returns key metrics and a normalised price series so the frontend
+# can plot all tickers on the same chart starting from a common baseline of 100.
 
 import logging
 import yfinance as yf
@@ -15,18 +17,20 @@ def compare_stocks(tickers: str, period: str = "1mo") -> dict:
     Use this when the user wants to compare two or more stocks."""
     ticker_list = [t.strip().upper() for t in tickers.split(",")]
     results = {}
-
     history_series: dict = {}
 
     for ticker in ticker_list:
         t = yf.Ticker(ticker)
         info = t.info
         hist = t.history(period=period)
+
         if hist.empty:
             results[ticker] = {"error": "No data"}
             continue
+
         closes = hist["Close"]
         total_return = round(((closes.iloc[-1] - closes.iloc[0]) / closes.iloc[0]) * 100, 2)
+
         results[ticker] = {
             "name": info.get("longName"),
             "price": info.get("currentPrice") or info.get("regularMarketPrice"),
@@ -36,7 +40,9 @@ def compare_stocks(tickers: str, period: str = "1mo") -> dict:
             "52w_low": info.get("fiftyTwoWeekLow"),
             f"return_{period}_pct": float(total_return),
         }
-        # Normalised to 100 at start so both lines are on the same scale
+
+        # Normalise prices to 100 at the start date so both lines are on the same scale.
+        # This makes percentage performance directly comparable regardless of share price.
         base = closes.iloc[0]
         history_series[ticker] = {
             date.strftime("%m-%d"): round((price / base) * 100, 3)

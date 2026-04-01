@@ -1,8 +1,10 @@
 # rag/rag_chain.py
-# Builds a LangChain RetrievalQA chain with a domain-specific financial prompt.
-# Uses MultiQueryRetriever: rewrites the user's question into multiple variants
-# before searching, so semantically different phrasings of the same question
-# all retrieve relevant chunks.
+# Builds the Retrieval-Augmented Generation (RAG) chain.
+# RAG = retrieval + generation: instead of answering from training data,
+# the LLM is given relevant document chunks as context and answers from those.
+#
+# Uses MultiQueryRetriever which improves recall by rephrasing the question
+# into 3 variants before searching — catches more relevant chunks.
 
 import logging
 from langchain_classic.chains import RetrievalQA
@@ -13,6 +15,8 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
+# Strict prompt — forces the LLM to answer only from the retrieved context,
+# not from its general training knowledge. This is essential for document Q&A accuracy.
 PROMPT_TEMPLATE = """You are a financial research assistant. Answer using ONLY the information in the context below.
 Rules:
 - Base your answer entirely on the context. Do not use outside knowledge.
@@ -29,16 +33,22 @@ Answer:"""
 
 
 def get_rag_chain(source_filter: str = "") -> RetrievalQA:
+    """Build and return a RetrievalQA chain.
+
+    source_filter: if provided, only search chunks from documents matching this string.
+    For example, source_filter='amazon' restricts retrieval to Amazon's uploaded files.
+    A new chain is created per call so the retriever can carry the correct filter."""
+
     llm = ChatOpenAI(
         model="gpt-4o-mini",
-        temperature=0,
+        temperature=0,        # Temperature 0 = deterministic, factual answers
         openai_api_key=settings.openai_api_key,
     )
 
-    # MultiQueryRetriever wraps the base retriever:
-    # 1. LLM generates 3 alternative phrasings of the user's question
-    # 2. Each phrasing is searched independently against the vector DB
-    # 3. Results are deduplicated and combined before being passed to the LLM
+    # MultiQueryRetriever improves retrieval quality by generating 3 query variants:
+    # 1. LLM rephrases the question 3 ways (catches different wordings in the docs)
+    # 2. Each variant is searched independently in the vector DB
+    # 3. Results are merged and deduplicated before being passed to the answer LLM
     base_retriever = get_retriever(source_filter=source_filter)
     multi_retriever = TracedMultiQueryRetriever.from_llm(
         retriever=base_retriever,
@@ -49,12 +59,16 @@ def get_rag_chain(source_filter: str = "") -> RetrievalQA:
         template=PROMPT_TEMPLATE,
         input_variables=["context", "question"],
     )
+
+    # "stuff" chain type = concatenate all chunks into one context string.
+    # Good for gpt-4o-mini's large context window; would need "map_reduce" for very long docs.
     chain = RetrievalQA.from_chain_type(
         llm=llm,
         chain_type="stuff",
         retriever=multi_retriever,
-        return_source_documents=True,
+        return_source_documents=True,   # Needed to show source filenames in the response
         chain_type_kwargs={"prompt": prompt},
     )
+
     logger.info("RAG chain initialised with MultiQueryRetriever")
     return chain

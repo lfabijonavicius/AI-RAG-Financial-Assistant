@@ -1,5 +1,7 @@
 # tools/portfolio.py
-# Tool 6 (Optional): Calculate basic portfolio risk metrics.
+# Tool 6: Calculate portfolio-level risk metrics using Modern Portfolio Theory.
+# Takes a set of tickers and weights, downloads 1 year of price history,
+# and computes annualised return, volatility, Sharpe ratio and correlation matrix.
 
 import logging
 import numpy as np
@@ -8,7 +10,8 @@ from langchain_core.tools import tool
 
 logger = logging.getLogger(__name__)
 
-RISK_FREE_RATE = 0.05  # annualised, approximate
+# Risk-free rate used in Sharpe ratio calculation (approximate US T-bill rate)
+RISK_FREE_RATE = 0.05
 
 
 @tool
@@ -25,16 +28,24 @@ def calculate_portfolio_risk(tickers: str, weights: str) -> dict:
     if round(sum(weight_list), 4) != 1.0:
         return {"error": f"Weights must sum to 1.0, got {sum(weight_list):.4f}"}
 
+    # Download 1 year of daily closing prices for all tickers at once
     data = yf.download(ticker_list, period="1y", auto_adjust=True, progress=False)["Close"]
     if data.empty:
         return {"error": "Could not retrieve price data"}
 
+    # Daily percentage returns, drop any rows with NaN (e.g. non-overlapping trading days)
     returns = data.pct_change().dropna()
     w = np.array(weight_list)
 
+    # Annualise by multiplying daily mean by 252 trading days
     portfolio_return = float(np.dot(w, returns.mean()) * 252)
+
+    # Portfolio variance = w^T * Σ * w (where Σ is the annualised covariance matrix)
     cov_matrix = returns.cov() * 252
     portfolio_volatility = float(np.sqrt(w @ cov_matrix.values @ w))
+
+    # Sharpe ratio = (return - risk-free rate) / volatility
+    # Higher is better — measures return per unit of risk taken
     sharpe = round((portfolio_return - RISK_FREE_RATE) / portfolio_volatility, 2)
 
     return {
@@ -43,5 +54,5 @@ def calculate_portfolio_risk(tickers: str, weights: str) -> dict:
         "expected_annual_return_pct": round(portfolio_return * 100, 2),
         "annual_volatility_pct": round(portfolio_volatility * 100, 2),
         "sharpe_ratio": sharpe,
-        "correlation_matrix": returns.corr().round(3).to_dict(),
+        "correlation_matrix": returns.corr().round(3).to_dict(),  # How correlated each pair is
     }

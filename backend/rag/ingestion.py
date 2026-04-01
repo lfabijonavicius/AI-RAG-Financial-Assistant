@@ -1,5 +1,7 @@
 # rag/ingestion.py
-# Loads PDFs from data/raw/, chunks them, embeds with OpenAI, upserts to Supabase pgvector.
+# Handles the full PDF → vector database pipeline.
+# Steps: load PDF → split into chunks → generate embeddings → store in Supabase pgvector.
+# Supports both bulk ingestion (from a local folder) and single-file upload ingestion.
 
 import logging
 import uuid
@@ -14,11 +16,18 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
+# Chunk size controls how much text each vector represents.
+# Smaller chunks = more precise retrieval but more vectors to store and search.
+# Overlap ensures sentences aren't cut off at chunk boundaries.
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 150
 
+# Small batches prevent Supabase from timing out on large inserts
+UPSERT_BATCH_SIZE = 50
+
 
 def load_documents(path: str):
+    """Load all PDF files from a local directory using LangChain's PDF loader."""
     raw = Path(path)
     docs = []
     pdfs = list(raw.glob("*.pdf"))
@@ -34,6 +43,9 @@ def load_documents(path: str):
 
 
 def chunk_documents(docs):
+    """Split documents into overlapping chunks for vector search.
+    RecursiveCharacterTextSplitter tries to break at natural boundaries
+    (paragraphs, sentences) before falling back to character splits."""
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,
@@ -43,11 +55,9 @@ def chunk_documents(docs):
     return chunks
 
 
-UPSERT_BATCH_SIZE = 50  # small batches to avoid Supabase statement timeout
-
-
 def get_ingested_sources() -> set[str]:
-    """Return set of source file paths already in the documents table."""
+    """Return the set of source file paths already stored in the documents table.
+    Used to skip re-ingesting files that haven't changed."""
     result = supabase.table("documents").select("metadata").execute()
     sources = set()
     for row in result.data:
@@ -58,13 +68,18 @@ def get_ingested_sources() -> set[str]:
 
 
 def ingest_file(file_bytes: bytes, filename: str) -> int:
-    """Ingest a single PDF from bytes. Stores source as 'pdfs/{filename}' for deduplication."""
+    """Ingest a single PDF uploaded via the API.
+    Writes to a temp file (PyPDFLoader needs a file path, not bytes),
+    then chunks, embeds and upserts to Supabase. Skips if already ingested."""
     storage_source = f"pdfs/{filename}"
+
+    # Skip if this file was already ingested — avoids duplicate vectors
     already_ingested = get_ingested_sources()
     if storage_source in already_ingested:
         logger.info(f"{filename} already ingested — skipping")
         return 0
 
+    # Write bytes to a temp file so PyPDFLoader can open it
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
         tmp.write(file_bytes)
         tmp_path = tmp.name
@@ -72,11 +87,11 @@ def ingest_file(file_bytes: bytes, filename: str) -> int:
     try:
         loader = PyPDFLoader(tmp_path)
         docs = loader.load()
-        # Override source metadata to use stable storage path
+        # Override the default source path with the stable Supabase Storage path
         for doc in docs:
             doc.metadata["source"] = storage_source
     finally:
-        os.unlink(tmp_path)
+        os.unlink(tmp_path)  # Always clean up the temp file
 
     if not docs:
         return 0
@@ -84,6 +99,7 @@ def ingest_file(file_bytes: bytes, filename: str) -> int:
     chunks = chunk_documents(docs)
     embeddings = OpenAIEmbeddings(openai_api_key=settings.openai_api_key)
 
+    # Embed and upsert in batches to stay within Supabase's statement size limits
     for i in range(0, len(chunks), UPSERT_BATCH_SIZE):
         batch = chunks[i: i + UPSERT_BATCH_SIZE]
         texts = [c.page_content for c in batch]
@@ -100,19 +116,22 @@ def ingest_file(file_bytes: bytes, filename: str) -> int:
 
 
 def delete_file_chunks(filename: str) -> None:
-    """Remove all chunks for a given uploaded file from the documents table."""
+    """Remove all vector chunks belonging to a specific uploaded file.
+    Called when a user deletes a document from the knowledge base."""
     storage_source = f"pdfs/{filename}"
     supabase.table("documents").delete().eq("metadata->>source", storage_source).execute()
     logger.info(f"Deleted chunks for {filename}")
 
 
 def ingest(path: str | None = None) -> int:
-    """Load PDFs, chunk, embed and upsert to Supabase. Skips already-ingested files."""
+    """Bulk ingestion from a local folder — used for initial data loading.
+    Automatically skips any files that are already in the vector database."""
     raw_path = path or settings.raw_data_path
     docs = load_documents(raw_path)
     if not docs:
         return 0
 
+    # Filter out pages from files we've already processed
     already_ingested = get_ingested_sources()
     new_docs = [d for d in docs if d.metadata.get("source") not in already_ingested]
     if not new_docs:
@@ -126,7 +145,6 @@ def ingest(path: str | None = None) -> int:
     chunks = chunk_documents(new_docs)
     embeddings = OpenAIEmbeddings(openai_api_key=settings.openai_api_key)
 
-    # Insert in small batches to avoid Supabase statement timeout
     for i in range(0, len(chunks), UPSERT_BATCH_SIZE):
         batch = chunks[i: i + UPSERT_BATCH_SIZE]
         texts = [c.page_content for c in batch]

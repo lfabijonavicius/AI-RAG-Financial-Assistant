@@ -1,5 +1,6 @@
 # tools/stock_price.py
-# Tool 1 (Core): Get the current live stock price for a ticker symbol.
+# Tool 1: Fetch the current live price for a stock or market index.
+# Used when the user asks "what is AAPL's price?" or "where is the S&P 500 today?".
 
 import logging
 import yfinance as yf
@@ -16,20 +17,25 @@ def get_stock_price(ticker: str) -> dict:
     symbol = ticker.upper()
     t = yf.Ticker(symbol)
     info = t.info
+
+    # Try the most reliable field first, fall back to regularMarketPrice for pre/post market
     price = info.get("currentPrice") or info.get("regularMarketPrice")
-    # Fallback for indices which don't populate currentPrice in .info
+
+    # Indices (^DJI, ^GSPC) don't populate currentPrice in .info — use fast_info instead
     if price is None:
         try:
             price = t.fast_info.last_price
         except Exception:
             pass
+
     if price is None:
         return {"error": f"Could not retrieve price for {ticker}"}
+
     return {
         "ticker": symbol,
         "price": price,
         "currency": info.get("currency", "USD"),
-        "market_state": info.get("marketState", "unknown"),
+        "market_state": info.get("marketState", "unknown"),  # REGULAR, PRE, POST, CLOSED
         "exchange": info.get("exchange", ""),
         "name": info.get("shortName") or info.get("longName", symbol),
     }
