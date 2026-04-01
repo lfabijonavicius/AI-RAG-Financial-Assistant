@@ -1,5 +1,7 @@
 # main.py
-# FastAPI app entry point. Routes: POST /chat, POST /ingest, GET /health, GET /history/{session_id}
+# The entry point for the entire backend.
+# Creates the FastAPI app, registers all API routes, and handles the chat streaming logic.
+# The frontend communicates exclusively with this file over HTTP.
 
 import logging
 from fastapi import FastAPI, HTTPException, Header, UploadFile
@@ -15,8 +17,11 @@ from rag.ingestion import ingest, ingest_file, delete_file_chunks
 from config import settings
 import json
 
+# Configure logging so all modules write to the same output (terminal / Railway logs)
 logging.basicConfig(level=logging.INFO)
 
+# Maps tool names to friendly status messages shown in the UI while the tool runs.
+# When the agent calls a tool, the frontend displays this string as a loading indicator.
 TOOL_STATUS: dict[str, str] = {
     "get_stock_price":          "Fetching live stock price...",
     "get_stock_history":        "Loading historical price data...",
@@ -27,10 +32,14 @@ TOOL_STATUS: dict[str, str] = {
     "calculate_portfolio_risk": "Calculating portfolio risk...",
     "search_knowledge_base":    "Searching uploaded documents...",
 }
+
 logger = logging.getLogger(__name__)
 
+# Create the FastAPI application instance
 app = FastAPI(title="Finance Chatbot API")
 
+# CORS middleware allows the frontend (different origin/port) to call this API.
+# Without this, browsers block cross-origin requests as a security measure.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in settings.allowed_origins.split(",")],
@@ -40,7 +49,8 @@ app.add_middleware(
 )
 
 
-# --- Schemas ---
+# --- Request/Response Schemas ---
+# Pydantic models validate incoming JSON automatically — FastAPI returns 422 if invalid.
 
 class ChatRequest(BaseModel):
     message: str
@@ -60,17 +70,21 @@ class SessionRequest(BaseModel):
 
 # --- Routes ---
 
+# The 6 market indices/assets shown in the scrolling ticker on the welcome screen
 MARKET_SYMBOLS = [
-    ("^GSPC",  "S&P 500"),
-    ("^DJI",   "Dow Jones"),
-    ("^IXIC",  "NASDAQ"),
-    ("^RUT",   "Russell 2000"),
-    ("GC=F",   "Gold"),
-    ("BTC-USD","Bitcoin"),
+    ("^GSPC",   "S&P 500"),
+    ("^DJI",    "Dow Jones"),
+    ("^IXIC",   "NASDAQ"),
+    ("^RUT",    "Russell 2000"),
+    ("GC=F",    "Gold"),
+    ("BTC-USD", "Bitcoin"),
 ]
+
 
 @app.get("/markets")
 async def get_markets():
+    """Fetch live price and daily % change for the 6 main market indices.
+    Uses ThreadPoolExecutor to fetch all 6 in parallel — much faster than sequential."""
     import yfinance as yf
     from concurrent.futures import ThreadPoolExecutor
 
@@ -78,23 +92,26 @@ async def get_markets():
         sym, name = sym_name
         try:
             t = yf.Ticker(sym)
-            hist = t.history(period="2d")
+            hist = t.history(period="2d")  # Need 2 days to calculate daily change
             if len(hist) < 2:
                 return None
             prev, curr = float(hist["Close"].iloc[-2]), float(hist["Close"].iloc[-1])
             change_pct = round((curr - prev) / prev * 100, 2)
             return {"symbol": sym, "name": name, "price": round(curr, 2), "change_pct": change_pct}
         except Exception:
-            return None
+            return None  # Silently skip any ticker that fails
 
     with ThreadPoolExecutor(max_workers=6) as ex:
         results = list(ex.map(fetch, MARKET_SYMBOLS))
 
+    # Filter out any None results from failed fetches
     return {"markets": [r for r in results if r]}
 
 
 @app.get("/health")
 async def health():
+    """Simple health check endpoint used to verify the backend and database are reachable.
+    Railway and monitoring tools can ping this to confirm the service is up."""
     try:
         supabase.table("documents").select("id").limit(1).execute()
         vectordb_ready = True
@@ -105,12 +122,16 @@ async def health():
 
 @app.post("/ingest", response_model=IngestResponse)
 async def ingest_documents():
+    """Trigger bulk ingestion of PDFs from the local data/raw/ folder into the vector DB.
+    Only used during initial setup — uploaded files use /documents/upload instead."""
     chunks = ingest()
     return {"status": "ok", "chunks_indexed": chunks}
 
 
 @app.get("/documents")
 async def list_documents():
+    """Return the list of PDF files currently stored in Supabase Storage.
+    Used by the Docs panel in the frontend to show what's in the knowledge base."""
     try:
         files = supabase.storage.from_("pdfs").list()
         return {"files": [{"name": f["name"], "size": f.get("metadata", {}).get("size", 0)} for f in files if f["name"] != ".emptyFolderPlaceholder"]}
@@ -120,26 +141,39 @@ async def list_documents():
 
 @app.post("/documents/upload")
 async def upload_document(file: UploadFile):
-    MAX_SIZE = 10 * 1024 * 1024  # 10MB
+    """Accept a PDF upload, store it in Supabase Storage, and ingest it into the vector DB.
+    Enforces a 10MB file size limit and a maximum of 10 uploaded documents."""
+    MAX_SIZE = 10 * 1024 * 1024  # 10MB in bytes
     MAX_FILES = 10
+
+    # Input validation — only accept PDF files
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted")
+
     existing = [f for f in supabase.storage.from_("pdfs").list() if f["name"] != ".emptyFolderPlaceholder"]
     if len(existing) >= MAX_FILES:
         raise HTTPException(status_code=400, detail=f"Document limit reached. Maximum {MAX_FILES} files allowed.")
+
     content = await file.read()
     if len(content) > MAX_SIZE:
         raise HTTPException(status_code=400, detail="File too large. Maximum size is 10MB")
+
+    # Replace spaces in filename to avoid URL encoding issues in Supabase Storage
     filename = file.filename.replace(" ", "_")
-    # Upload to Supabase Storage
+
+    # Step 1: store the raw PDF file in Supabase Storage (for display in the UI)
     supabase.storage.from_("pdfs").upload(filename, content, {"content-type": "application/pdf"})
-    # Ingest into vector DB
+
+    # Step 2: chunk, embed and store in the vector DB (for RAG retrieval)
     chunks = ingest_file(content, filename)
+
     return {"status": "ok", "filename": filename, "chunks_indexed": chunks}
 
 
 @app.delete("/documents/{filename}")
 async def delete_document(filename: str):
+    """Remove a PDF from Supabase Storage and delete all its vector chunks from the DB.
+    Both steps are needed — leaving orphan chunks would pollute future search results."""
     supabase.storage.from_("pdfs").remove([filename])
     delete_file_chunks(filename)
     return {"status": "ok"}
@@ -147,24 +181,32 @@ async def delete_document(filename: str):
 
 @app.post("/sessions")
 async def new_session(request: SessionRequest):
+    """Create a new chat session and return its ID.
+    The frontend calls this the first time a user sends a message in a new chat."""
     session_id = create_session(request.user_id, request.title)
     return {"session_id": session_id}
 
 
 @app.get("/sessions/{user_id}")
 async def list_sessions(user_id: str):
+    """Return all chat sessions for a user, newest first.
+    Populates the sidebar session list in the frontend."""
     from db.conversations import get_sessions
     return {"sessions": get_sessions(user_id)}
 
 
 @app.get("/history/{session_id}")
 async def get_history(session_id: str):
+    """Return all messages in a session in chronological order.
+    Called when switching to an existing session to restore the conversation."""
     messages = get_messages(session_id)
     return {"messages": messages}
 
 
 @app.get("/portfolio/{user_id}")
 async def get_portfolio(user_id: str):
+    """Return the user's portfolio positions with live prices and P&L calculations.
+    Fetches current prices from yfinance for each held ticker in real time."""
     import yfinance as yf
     rows = supabase.table("portfolios").select("*").eq("user_id", user_id).execute().data
     if not rows:
@@ -187,10 +229,11 @@ async def get_portfolio(user_id: str):
             price = 0.0
             name = ticker
 
-        cost_basis = avg_buy * shares
-        current_value = price * shares
-        pl = current_value - cost_basis
-        pl_pct = ((price - avg_buy) / avg_buy * 100) if avg_buy else 0
+        # P&L calculations
+        cost_basis = avg_buy * shares                  # How much the user paid
+        current_value = price * shares                 # What it's worth now
+        pl = current_value - cost_basis                # Absolute profit/loss in $
+        pl_pct = ((price - avg_buy) / avg_buy * 100) if avg_buy else 0  # % gain/loss
 
         total_value += current_value
         total_cost += cost_basis
@@ -227,6 +270,8 @@ class PortfolioPosition(BaseModel):
 
 @app.post("/portfolio")
 async def add_position(pos: PortfolioPosition):
+    """Add or update a portfolio position.
+    Uses upsert so sending the same ticker twice updates shares/price instead of duplicating."""
     supabase.table("portfolios").upsert({
         "user_id": pos.user_id,
         "ticker": pos.ticker.upper(),
@@ -238,12 +283,15 @@ async def add_position(pos: PortfolioPosition):
 
 @app.delete("/portfolio/{user_id}/{ticker}")
 async def remove_position(user_id: str, ticker: str):
+    """Remove a single position from the user's portfolio."""
     supabase.table("portfolios").delete().eq("user_id", user_id).eq("ticker", ticker.upper()).execute()
     return {"status": "ok"}
 
 
 @app.get("/ticker/{ticker}")
 async def get_ticker_info(ticker: str):
+    """Return detailed info for a ticker — used by the Details panel on the right sidebar.
+    Combines fundamentals from yfinance .info with 1-month price history for the mini chart."""
     import yfinance as yf
     sym = ticker.upper()
     t = yf.Ticker(sym)
@@ -256,6 +304,7 @@ async def get_ticker_info(ticker: str):
     total_return = round(((closes.iloc[-1] - closes.iloc[0]) / closes.iloc[0]) * 100, 2)
     history_list = [round(float(v), 2) for v in closes.values]
 
+    # Try multiple fields — availability varies between stocks and indices
     price = (
         info.get("currentPrice")
         or info.get("regularMarketPrice")
@@ -280,7 +329,8 @@ async def get_ticker_info(ticker: str):
 
 @app.get("/debug/retrieve")
 async def debug_retrieve(q: str, k: int = 10):
-    """Dev-only: show which chunks would be retrieved for a query."""
+    """Dev-only endpoint to inspect which chunks the retriever would return for a query.
+    Useful for debugging RAG quality without going through the full agent."""
     from rag.retriever import SupabaseRetriever
     retriever = SupabaseRetriever(top_k=k)
     docs = retriever._get_relevant_documents(q)
@@ -296,31 +346,44 @@ async def debug_retrieve(q: str, k: int = 10):
 
 @app.post("/chat")
 async def chat(request: ChatRequest):
+    """Main chat endpoint — the core of the application.
+    Streams the agent's response back to the frontend using Server-Sent Events (SSE).
+
+    SSE works by keeping the HTTP connection open and sending data: chunks one by one,
+    so the user sees text appear word-by-word instead of waiting for the full response.
+
+    The stream() generator yields different event types:
+    - {status: "..."}     → loading message while a tool runs
+    - {token: "..."}      → one piece of the AI's text response
+    - {clear: true}       → tells frontend to clear text (used before RAG answer)
+    - {tool_calls: [...]} → final summary of all tool calls and results
+    - {error: "..."}      → something went wrong
+    """
+    # Check rate limit before doing any expensive LLM work
     check_rate_limit(request.user_id)
 
+    # Build the agent with conversation history loaded from Supabase
     agent, history = get_agent(request.session_id, request.user_id)
 
     from langchain_core.messages import HumanMessage
 
     async def stream():
-        full_response = ""
-        tool_calls_log = []
-        # Map tool_call_id -> tool name so we can match results
-        pending: dict[str, str] = {}
-        # When the RAG tool is called, stream its result directly and skip the
-        # agent's post-tool paraphrase (which otherwise duplicates the answer).
-        rag_called = False
+        full_response = ""       # Accumulates the complete text for saving to DB at the end
+        tool_calls_log = []      # Records every tool call and its result for the frontend
+        pending: dict[str, str] = {}  # Maps tool_call_id → tool name for matching results
+        rag_called = False       # Flag to suppress duplicate text after RAG tool runs
         tokens_used = 0
 
         try:
+            # stream_mode="messages" gives us individual message chunks as they're generated
             for chunk in agent.stream(
                 {"messages": history + [HumanMessage(content=request.message)]},
                 stream_mode="messages",
             ):
-                # chunk is a tuple (message, metadata) in messages stream mode
-                message, metadata = chunk
+                message, metadata = chunk  # Each chunk is a (message, metadata) tuple
 
-                # Capture tool calls (input args + id) and emit status
+                # --- Tool call initiated ---
+                # The agent has decided to call a tool — capture it and send a status message
                 if hasattr(message, "tool_calls") and message.tool_calls:
                     for tc in message.tool_calls:
                         pending[tc["id"]] = tc["name"]
@@ -332,26 +395,30 @@ async def chat(request: ChatRequest):
                         status = TOOL_STATUS.get(tc["name"], f"Running {tc['name']}...")
                         if tc["name"] == "search_knowledge_base":
                             rag_called = True
-                            # Discard any pre-tool text already streamed
+                            # Clear any pre-tool text — the RAG answer replaces it
                             full_response = ""
                             yield f"data: {json.dumps({'clear': True})}\n\n"
                         yield f"data: {json.dumps({'status': status})}\n\n"
-                        yield ": ping\n\n"  # flush buffer
+                        yield ": ping\n\n"  # SSE comment — forces nginx to flush the buffer
 
-                # Capture tool results (ToolMessage)
+                # --- Tool result received ---
+                # A ToolMessage contains the return value from the tool function
                 if message.type == "tool":
                     tool_name = pending.get(getattr(message, "tool_call_id", ""), "")
                     try:
-                        result = json.loads(message.content)
+                        result = json.loads(message.content)  # Tools return JSON strings
                     except Exception:
                         result = message.content
-                    # Attach result to matching tool call entry
+                    # Match this result to the correct tool call entry in the log
                     for entry in reversed(tool_calls_log):
                         if entry["tool"] == tool_name and entry["result"] is None:
                             entry["result"] = result
                             break
-                    # For the RAG tool, strip the hidden process suffix, stream
-                    # the clean answer, and store the process data separately.
+
+                    # Special handling for the RAG tool:
+                    # The tool appends a hidden __RAG_PROCESS__ suffix containing the
+                    # generated queries and retrieved chunks for the UI visualisation.
+                    # We strip it here so it never reaches the user as text.
                     if tool_name == "search_knowledge_base":
                         content = message.content
                         process: dict = {}
@@ -369,7 +436,10 @@ async def chat(request: ChatRequest):
                         full_response = content
                         yield f"data: {json.dumps({'token': content})}\n\n"
 
-                # Stream AI text — skip post-tool agent output when RAG handled it
+                # --- AI text token ---
+                # Stream the LLM's text response word by word.
+                # Skip if: the message contains tool calls (not final text),
+                # or if RAG already provided the answer (avoids duplication).
                 if hasattr(message, "content") and message.content:
                     is_ai = message.type in ("ai", "AIMessageChunk")
                     has_tool_calls = bool(getattr(message, "tool_calls", None))
@@ -377,12 +447,12 @@ async def chat(request: ChatRequest):
                         full_response += message.content
                         yield f"data: {json.dumps({'token': message.content})}\n\n"
 
-                # Capture token usage from AI messages
+                # Track token usage for the cost display in the UI
                 usage = getattr(message, "usage_metadata", None)
                 if usage:
                     tokens_used = usage.get("total_tokens", tokens_used)
 
-            # Persist the full turn
+            # Save the completed conversation turn to Supabase
             persist_turn(
                 session_id=request.session_id,
                 user_message=request.message,
@@ -390,8 +460,9 @@ async def chat(request: ChatRequest):
                 tool_calls=tool_calls_log if tool_calls_log else None,
                 tokens_used=tokens_used if tokens_used else None,
             )
-            increment_usage(request.user_id)
+            increment_usage(request.user_id)  # Count this request toward daily limit
 
+            # Send the final event with all tool call data and token count
             yield f"data: {json.dumps({'tool_calls': tool_calls_log, 'tokens_used': tokens_used})}\n\n"
             yield "data: [DONE]\n\n"
 
@@ -403,7 +474,7 @@ async def chat(request: ChatRequest):
         stream(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
+            "Cache-Control": "no-cache",       # Prevent any caching of the stream
+            "X-Accel-Buffering": "no",         # Tell nginx (Railway) not to buffer SSE
         },
     )
