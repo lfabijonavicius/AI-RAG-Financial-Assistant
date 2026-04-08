@@ -7,28 +7,28 @@ An AI-powered financial chatbot built with a LangGraph ReAct agent, RAG pipeline
 ## Screenshots
 
 ### Login
-![Login](screenshots/Screenshot%202026-04-08%20at%2015.13.11.png)
+![Login](screenshots/login.png)
 
 ### Home — Live Market Ticker & Quick Prompts
-![Home](screenshots/Screenshot%202026-04-08%20at%2015.12.53.png)
+![Home](screenshots/home.png)
 
 ### Market News with Sentiment Badges
-![Market News](screenshots/Screenshot%202026-04-08%20at%2012.25.34.png)
+![Market News](screenshots/market-news.png)
 
 ### Stock Comparison Chart
-![Stock Comparison](screenshots/Screenshot%202026-04-08%20at%2015.14.05.png)
+![Stock Comparison](screenshots/stock-comparison.png)
 
 ### Document Q&A (RAG) — NVIDIA 10-K
-![RAG Q&A](screenshots/Screenshot%202026-04-08%20at%2015.15.41.png)
+![RAG Q&A](screenshots/rag-qa.png)
 
 ### Stock Details Panel
-![Stock Details](screenshots/Screenshot%202026-04-08%20at%2015.16.30.png)
+![Stock Details](screenshots/stock-details.png)
 
 ### Portfolio Tracker
-![Portfolio](screenshots/Screenshot%202026-04-08%20at%2015.16.10.png)
+![Portfolio](screenshots/portfolio.png)
 
 ### Knowledge Base — Uploaded Documents
-![Docs](screenshots/Screenshot%202026-04-08%20at%2015.16.00.png)
+![Docs](screenshots/docs.png)
 
 ---
 
