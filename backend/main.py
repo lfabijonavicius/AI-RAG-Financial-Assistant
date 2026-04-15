@@ -17,6 +17,37 @@ from rag.ingestion import ingest, ingest_file, delete_file_chunks
 from config import settings
 import json
 
+OFF_TOPIC_REPLY = "I'm a financial research assistant and can only help with finance and investing questions."
+
+_FINANCE_KEYWORDS = {
+    "stock", "share", "equity", "market", "invest", "portfolio", "ticker",
+    "price", "dividend", "etf", "fund", "bond", "crypto", "bitcoin", "forex",
+    "return", "loss", "profit", "revenue", "earnings", "balance sheet",
+    "income statement", "cash flow", "10-k", "annual report", "sec", "ipo",
+    "hedge", "option", "future", "commodity", "index", "dow", "nasdaq", "s&p",
+    "inflation", "interest rate", "gdp", "economy", "economic", "financial",
+    "finance", "money", "trade", "trading", "asset", "liability", "valuation",
+    "pe ratio", "market cap", "short", "long", "bull", "bear", "volatility",
+    "risk", "yield", "reit", "roe", "eps", "ebitda", "fiscal",
+}
+
+_OFF_TOPIC_KEYWORDS = {
+    "joke", "recipe", "cook", "movie", "sport", "football", "basketball",
+    "soccer", "weather", "travel", "hotel", "restaurant", "song", "music",
+    "game", "poem", "story", "riddle", "fun fact", "trivia", "dating",
+    "relationship", "fitness", "workout", "diet", "health tip",
+}
+
+
+def is_off_topic(message: str) -> bool:
+    """Return True if the message is clearly unrelated to finance."""
+    lower = message.lower()
+    if any(kw in lower for kw in _FINANCE_KEYWORDS):
+        return False
+    if any(kw in lower for kw in _OFF_TOPIC_KEYWORDS):
+        return True
+    return False
+
 # Configure logging so all modules write to the same output (terminal / Railway logs)
 logging.basicConfig(level=logging.INFO)
 
@@ -361,6 +392,13 @@ async def chat(request: ChatRequest):
     """
     # Check rate limit before doing any expensive LLM work
     check_rate_limit(request.user_id)
+
+    # Reject off-topic messages before invoking the agent
+    if is_off_topic(request.message):
+        async def _off_topic_stream():
+            yield f"data: {json.dumps({'token': OFF_TOPIC_REPLY})}\n\n"
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(_off_topic_stream(), media_type="text/event-stream")
 
     # Build the agent with conversation history loaded from Supabase
     agent, history = get_agent(request.session_id, request.user_id)
