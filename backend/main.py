@@ -8,6 +8,8 @@ from fastapi import FastAPI, HTTPException, Header, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import SystemMessage, HumanMessage
 from agent.agent import get_agent
 from agent.memory import persist_turn
 from db.conversations import get_messages, create_session
@@ -19,34 +21,20 @@ import json
 
 OFF_TOPIC_REPLY = "I'm a financial research assistant and can only help with finance and investing questions."
 
-_FINANCE_KEYWORDS = {
-    "stock", "share", "equity", "market", "invest", "portfolio", "ticker",
-    "price", "dividend", "etf", "fund", "bond", "crypto", "bitcoin", "forex",
-    "return", "loss", "profit", "revenue", "earnings", "balance sheet",
-    "income statement", "cash flow", "10-k", "annual report", "sec", "ipo",
-    "hedge", "option", "future", "commodity", "index", "dow", "nasdaq", "s&p",
-    "inflation", "interest rate", "gdp", "economy", "economic", "financial",
-    "finance", "money", "trade", "trading", "asset", "liability", "valuation",
-    "pe ratio", "market cap", "short", "long", "bull", "bear", "volatility",
-    "risk", "yield", "reit", "roe", "eps", "ebitda", "fiscal",
-}
 
-_OFF_TOPIC_KEYWORDS = {
-    "joke", "recipe", "cook", "movie", "sport", "football", "basketball",
-    "soccer", "weather", "travel", "hotel", "restaurant", "song", "music",
-    "game", "poem", "story", "riddle", "fun fact", "trivia", "dating",
-    "relationship", "fitness", "workout", "diet", "health tip",
-}
-
-
-def is_off_topic(message: str) -> bool:
-    """Return True if the message is clearly unrelated to finance."""
-    lower = message.lower()
-    if any(kw in lower for kw in _FINANCE_KEYWORDS):
-        return False
-    if any(kw in lower for kw in _OFF_TOPIC_KEYWORDS):
-        return True
-    return False
+async def is_finance_related(message: str) -> bool:
+    """Use a fast LLM call to classify whether the message is finance-related."""
+    classifier = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=settings.openai_api_key)
+    response = await classifier.ainvoke([
+        SystemMessage(content=(
+            "You are a topic classifier for a financial research assistant. "
+            "Reply with only YES or NO. "
+            "YES = the message is related to finance, investing, stocks, markets, economics, portfolios, or financial documents. "
+            "NO = the message is about anything else."
+        )),
+        HumanMessage(content=message),
+    ])
+    return response.content.strip().upper().startswith("Y")
 
 # Configure logging so all modules write to the same output (terminal / Railway logs)
 logging.basicConfig(level=logging.INFO)
@@ -394,7 +382,7 @@ async def chat(request: ChatRequest):
     check_rate_limit(request.user_id)
 
     # Reject off-topic messages before invoking the agent
-    if is_off_topic(request.message):
+    if not await is_finance_related(request.message):
         async def _off_topic_stream():
             yield f"data: {json.dumps({'token': OFF_TOPIC_REPLY})}\n\n"
             yield "data: [DONE]\n\n"
@@ -402,8 +390,6 @@ async def chat(request: ChatRequest):
 
     # Build the agent with conversation history loaded from Supabase
     agent, history = get_agent(request.session_id, request.user_id)
-
-    from langchain_core.messages import HumanMessage
 
     async def stream():
         full_response = ""       # Accumulates the complete text for saving to DB at the end
