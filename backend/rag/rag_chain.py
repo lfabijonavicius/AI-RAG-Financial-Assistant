@@ -56,10 +56,11 @@ def get_rag_chain(source_filter: str = "") -> RetrievalQA:
         openai_api_key=settings.openai_api_key,
     )
 
-    # Separate lightweight LLM just for query generation — capped at 100 tokens
-    # since the rephrased queries are always short. Saves ~1-2s vs using the full LLM.
+    # Separate lightweight LLM just for query generation — gpt-4.1-nano is faster
+    # and cheaper than gpt-4o-mini for simple rephrasing tasks. Capped at 100 tokens
+    # since queries are always short.
     query_llm = ChatOpenAI(
-        model="gpt-4o-mini",
+        model="gpt-4.1-nano",
         temperature=0,
         max_tokens=100,
         openai_api_key=settings.openai_api_key,
