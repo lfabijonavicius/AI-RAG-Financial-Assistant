@@ -13,6 +13,17 @@ from langchain_core.prompts import PromptTemplate
 from rag.retriever import get_retriever, TracedMultiQueryRetriever
 from config import settings
 
+# Prompt that generates 2 query variants instead of the default 3.
+# Fewer variants = fewer LLM calls = faster retrieval with minimal quality loss.
+MULTI_QUERY_PROMPT = PromptTemplate(
+    input_variables=["question"],
+    template=(
+        "Generate 2 different phrasings of the following question to improve "
+        "document retrieval. Output only the questions, one per line, no numbering.\n\n"
+        "Question: {question}"
+    ),
+)
+
 logger = logging.getLogger(__name__)
 
 # Strict prompt — forces the LLM to answer only from the retrieved context,
@@ -45,14 +56,24 @@ def get_rag_chain(source_filter: str = "") -> RetrievalQA:
         openai_api_key=settings.openai_api_key,
     )
 
-    # MultiQueryRetriever improves retrieval quality by generating 3 query variants:
-    # 1. LLM rephrases the question 3 ways (catches different wordings in the docs)
+    # Separate lightweight LLM just for query generation — capped at 100 tokens
+    # since the rephrased queries are always short. Saves ~1-2s vs using the full LLM.
+    query_llm = ChatOpenAI(
+        model="gpt-4o-mini",
+        temperature=0,
+        max_tokens=100,
+        openai_api_key=settings.openai_api_key,
+    )
+
+    # MultiQueryRetriever improves retrieval quality by generating query variants:
+    # 1. LLM rephrases the question (catches different wordings in the docs)
     # 2. Each variant is searched independently in the vector DB
     # 3. Results are merged and deduplicated before being passed to the answer LLM
     base_retriever = get_retriever(source_filter=source_filter)
     multi_retriever = TracedMultiQueryRetriever.from_llm(
         retriever=base_retriever,
-        llm=llm,
+        llm=query_llm,
+        prompt=MULTI_QUERY_PROMPT,
     )
 
     prompt = PromptTemplate(
